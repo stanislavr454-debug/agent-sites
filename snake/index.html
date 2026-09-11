@@ -1,1 +1,186 @@
-<!DOCTYPE html><html><head><title>Змейка</title><style>canvas {border: 1px solid #000; display: block; margin: 0 auto; background: #f0f0f0;}</style></head><body><canvas id="game" width="400" height="400"></canvas><script>const canvas = document.getElementById('game');const ctx = canvas.getContext('2d');let snake = [{x: 200, y: 200}];let dx = 10, dy = 0;let food = {x: 300, y: 300};function game() {let head = {x: snake[0].x + dx, y: snake[0].y + dy};if (head.x < 0 || head.x >= canvas.width || head.y < 0 || head.y >= canvas.height || snake.some(segment => segment.x === head.x && segment.y === head.y)) {alert('Игра окончена!');return;}snake.unshift(head);if (head.x === food.x && head.y === food.y) {food = {x: Math.floor(Math.random() * (canvas.width/10))*10, y: Math.floor(Math.random() * (canvas.height/10))*10};} else {snake.pop();}ctx.clearRect(0, 0, canvas.width, canvas.height);ctx.fillStyle = 'lime';snake.forEach(segment => {ctx.fillRect(segment.x, segment.y, 10, 10);});ctx.fillStyle = 'red';ctx.fillRect(food.x, food.y, 10, 10);requestAnimationFrame(game);}document.addEventListener('keydown', e => {if (e.key === 'ArrowLeft') {dx = -10; dy = 0;} else if (e.key === 'ArrowRight') {dx = 10; dy = 0;} else if (e.key === 'ArrowUp') {dx = 0; dy = -10;} else if (e.key === 'ArrowDown') {dx = 0; dy = 10;}});game();</script></body></html>
+<!doctype html><html lang=ru><head><meta charset=utf-8>
+<meta name=viewport content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Змейка</title>
+<style>
+:root{--фон:#f4f4f5;--поле:#fff;--рамка:#dcdce0;--текст:#18181b;--тускло:#71717a;
+      --змея:#22c55e;--голова:#16a34a;--еда:#ef4444;--кнопка:#e4e4e7}
+@media (prefers-color-scheme:dark){
+  :root{--фон:#121214;--поле:#1c1c1f;--рамка:#2e2e33;--текст:#f4f4f5;--тускло:#a1a1aa;
+        --кнопка:#27272a}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--фон);color:var(--текст);
+     font:16px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+     display:flex;flex-direction:column;align-items:center;gap:.75rem;
+     padding:1rem .75rem;min-height:100dvh;touch-action:none;-webkit-user-select:none;user-select:none}
+h1{font-size:1.1rem;margin:0;font-weight:600;letter-spacing:.02em}
+#счёт{display:flex;gap:1.25rem;color:var(--тускло);font-size:.95rem;font-variant-numeric:tabular-nums}
+#счёт b{color:var(--текст);font-weight:600}
+#обёртка{position:relative;width:min(92vw,min(420px,58dvh))}
+canvas{display:block;width:100%;height:auto;background:var(--поле);
+       border:1px solid var(--рамка);border-radius:12px}
+#конец{position:absolute;inset:0;display:none;flex-direction:column;align-items:center;
+       justify-content:center;gap:.9rem;border-radius:12px;
+       background:color-mix(in srgb,var(--поле) 88%,transparent);backdrop-filter:blur(2px)}
+#конец.видно{display:flex}
+#конец p{margin:0;font-size:1.15rem;font-weight:600}
+button{font:inherit;color:var(--текст);background:var(--кнопка);border:1px solid var(--рамка);
+       border-radius:10px;padding:.6rem 1.1rem;cursor:pointer}
+button:active{transform:translateY(1px)}
+#пульт{display:grid;grid-template-columns:repeat(3,3.6rem);grid-template-rows:repeat(2,3.6rem);
+       gap:.5rem;justify-content:center}
+#пульт button{padding:0;font-size:1.3rem;border-radius:12px}
+.вверх{grid-column:2}
+#подсказка{color:var(--тускло);font-size:.85rem;text-align:center;max-width:22rem}
+@media (hover:hover) and (pointer:fine){#пульт{display:none}}
+</style></head><body>
+
+<h1>Змейка</h1>
+<div id=счёт><span>очки <b id=очки>0</b></span><span>рекорд <b id=рекорд>0</b></span></div>
+
+<div id=обёртка>
+  <canvas id=поле width=400 height=400></canvas>
+  <div id=конец>
+    <p id=итог>Игра окончена</p>
+    <button id=заново>Играть снова</button>
+  </div>
+</div>
+
+<div id=пульт>
+  <button class=вверх data-к=up aria-label=вверх>↑</button>
+  <button data-к=left aria-label=влево>←</button>
+  <button data-к=down aria-label=вниз>↓</button>
+  <button data-к=right aria-label=вправо>→</button>
+</div>
+
+<p id=подсказка>Свайп по полю или кнопки. На компьютере — стрелки, пробел — пауза.</p>
+
+<script>
+const КЛЕТКА = 20, ПОЛЕ = 20;           // 20x20 клеток по 20 пикселей
+const холст = document.getElementById('поле'), ctx = холст.getContext('2d');
+const элОчки = document.getElementById('очки'), элРекорд = document.getElementById('рекорд');
+const экранКонца = document.getElementById('конец'), элИтог = document.getElementById('итог');
+
+let змея, напр, следщий, еда, очки, живы, пауза, шагМс, таймер;
+
+// Рекорд держим в браузере игрока: сервер для этого поднимать незачем.
+let рекорд = 0;
+try { рекорд = +(localStorage.getItem('змейка-рекорд') || 0) } catch (e) {}
+элРекорд.textContent = рекорд;
+
+function новаяЕда() {
+  // Кладём еду только на свободную клетку, иначе она появится под змеёй
+  // и станет недосягаемой.
+  const свободные = [];
+  for (let x = 0; x < ПОЛЕ; x++)
+    for (let y = 0; y < ПОЛЕ; y++)
+      if (!змея.some(с => с.x === x && с.y === y)) свободные.push({x, y});
+  return свободные[Math.floor(Math.random() * свободные.length)];
+}
+
+function старт() {
+  змея = [{x: 10, y: 10}, {x: 9, y: 10}, {x: 8, y: 10}];
+  напр = {x: 1, y: 0}; следщий = напр;
+  очки = 0; живы = true; пауза = false; шагМс = 130;
+  еда = новаяЕда();
+  элОчки.textContent = 0;
+  экранКонца.classList.remove('видно');
+  clearInterval(таймер);
+  таймер = setInterval(шаг, шагМс);
+  рисовать();
+}
+
+function шаг() {
+  if (!живы || пауза) return;
+  напр = следщий;
+  const г = {x: змея[0].x + напр.x, y: змея[0].y + напр.y};
+
+  const встена = г.x < 0 || г.y < 0 || г.x >= ПОЛЕ || г.y >= ПОЛЕ;
+  // Хвост в этот ход уйдёт, поэтому последний сегмент столкновением не считаем —
+  // иначе змейка «врезается» в клетку, которая уже освободилась.
+  const всебя = змея.slice(0, -1).some(с => с.x === г.x && с.y === г.y);
+  if (встена || всебя) return конец();
+
+  змея.unshift(г);
+  if (г.x === еда.x && г.y === еда.y) {
+    очки++; элОчки.textContent = очки;
+    еда = новаяЕда();
+    if (очки % 5 === 0 && шагМс > 70) {        // каждые пять яблок чуть быстрее
+      шагМс -= 10; clearInterval(таймер); таймер = setInterval(шаг, шагМс);
+    }
+  } else {
+    змея.pop();
+  }
+  рисовать();
+}
+
+function конец() {
+  живы = false;
+  clearInterval(таймер);
+  if (очки > рекорд) {
+    рекорд = очки; элРекорд.textContent = рекорд;
+    try { localStorage.setItem('змейка-рекорд', рекорд) } catch (e) {}
+    элИтог.textContent = 'Рекорд! ' + очки;
+  } else {
+    элИтог.textContent = 'Игра окончена — ' + очки;
+  }
+  экранКонца.classList.add('видно');
+}
+
+function цвет(имя) { return getComputedStyle(document.documentElement).getPropertyValue(имя) }
+
+function рисовать() {
+  ctx.clearRect(0, 0, холст.width, холст.height);
+  ctx.fillStyle = цвет('--еда');
+  ctx.beginPath();
+  ctx.arc(еда.x * КЛЕТКА + КЛЕТКА / 2, еда.y * КЛЕТКА + КЛЕТКА / 2, КЛЕТКА / 2 - 2, 0, 7);
+  ctx.fill();
+  змея.forEach((с, i) => {
+    ctx.fillStyle = цвет(i === 0 ? '--голова' : '--змея');
+    ctx.beginPath();
+    ctx.roundRect(с.x * КЛЕТКА + 1, с.y * КЛЕТКА + 1, КЛЕТКА - 2, КЛЕТКА - 2, 5);
+    ctx.fill();
+  });
+}
+
+function повернуть(куда) {
+  const н = {up: {x: 0, y: -1}, down: {x: 0, y: 1},
+             left: {x: -1, y: 0}, right: {x: 1, y: 0}}[куда];
+  // Разворот на 180° — мгновенная смерть об собственную шею, и это всегда
+  // случайность, а не замысел игрока. Просто не даём так сделать.
+  if (!н || (н.x === -напр.x && н.y === -напр.y)) return;
+  следщий = н;
+}
+
+addEventListener('keydown', e => {
+  const к = {ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right',
+             w: 'up', s: 'down', a: 'left', d: 'right',
+             ц: 'up', ы: 'down', ф: 'left', в: 'right'}[e.key];
+  if (к) { e.preventDefault(); повернуть(к); }
+  if (e.key === ' ') { e.preventDefault(); if (живы) пауза = !пауза; }
+  if (e.key === 'Enter' && !живы) старт();
+});
+
+document.querySelectorAll('#пульт button').forEach(б => {
+  // pointerdown, а не click: на телефоне click приходит с задержкой в треть
+  // секунды, и змейка успевает уехать не туда.
+  б.addEventListener('pointerdown', e => { e.preventDefault(); повернуть(б.dataset.к) });
+});
+
+let касание = null;
+холст.addEventListener('pointerdown', e => { касание = {x: e.clientX, y: e.clientY} });
+холст.addEventListener('pointerup', e => {
+  if (!касание) return;
+  const дх = e.clientX - касание.x, ду = e.clientY - касание.y;
+  касание = null;
+  if (Math.abs(дх) < 24 && Math.abs(ду) < 24) {      // тычок, а не свайп
+    if (!живы) старт(); else пауза = !пауза;
+    return;
+  }
+  повернуть(Math.abs(дх) > Math.abs(ду) ? (дх > 0 ? 'right' : 'left')
+                                        : (ду > 0 ? 'down' : 'up'));
+});
+
+document.getElementById('заново').addEventListener('click', старт);
+старт();
+</script>
+</body></html>
